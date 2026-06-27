@@ -19,6 +19,16 @@ app.use("/api/v1/coins", require("./routes/coinRoutes"));
 app.use("/api/v1/withdrawals", require("./routes/withdrawalRoutes"));
 app.use("/api/v1/payments", require("./routes/paymentRoutes"));
 
+<<<<<<< HEAD
+=======
+app.get("/", (req, res) => {
+  res.status(200).send({
+    success: true,
+    msg: "Node Server Running ",
+  });
+});
+
+>>>>>>> ffe08a0dbfd4fb4a808ea89e87658a2bfe325ba1
 const PORT = process.env.PORT;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`.bgGreen.white);
