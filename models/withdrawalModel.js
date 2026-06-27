@@ -2,16 +2,34 @@ const mongoose = require("mongoose");
 
 const withdrawalSchema = new mongoose.Schema(
   {
-    user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-    amount: { type: Number, required: true, min: 1 },
-    paymentMethod: { type: String, enum: ["UPI", "Bank"], required: true },
-    paymentDetails: { type: mongoose.Schema.Types.Mixed, required: true },
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    amount: {
+      type: Number,
+      required: true,
+      min: 1,
+    },
+    paymentMethod: {
+      type: String,
+      enum: ["UPI", "Bank"],
+      required: true,
+    },
+    paymentDetails: {
+      type: mongoose.Schema.Types.Mixed,
+      required: true,
+    },
     status: {
       type: String,
-      enum: ["approved", "rejected"],
-      default: "approved",
+      enum: ["pending", "approved", "rejected"],
+      default: "pending",
     },
-    adminNote: { type: String, default: "" },
+    adminNote: {
+      type: String,
+      default: "",
+    },
   },
   { timestamps: true },
 );
