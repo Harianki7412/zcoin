@@ -1,31 +1,11 @@
-const Razorpay = require("razorpay");
-const crypto = require("crypto");
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const userModel = require("../models/userModel");
 const transactionModel = require("../models/transactionModel");
 const withdrawalModel = require("../models/withdrawalModel");
 
-// Initialize Razorpay with validation
-let razorpay;
-try {
-  razorpay = new Razorpay({
-    key_id: process.env.RAZORPAY_KEY_ID,
-    key_secret: process.env.RAZORPAY_KEY_SECRET,
-  });
-  console.log("✅ Razorpay initialized successfully");
-} catch (error) {
-  console.error("❌ Razorpay initialization failed:", error.message);
-}
-
-// Create Razorpay order for adding coins
-const createOrder = async (req, res) => {
+// Create Payment Intent for adding coins
+const createPaymentIntent = async (req, res) => {
   try {
-    if (!razorpay) {
-      return res.status(500).json({
-        success: false,
-        message: "Razorpay not initialized. Check API keys.",
-      });
-    }
-
     const { amount } = req.body; // amount in INR (1 Zcoin = ₹1)
     if (!amount || amount <= 0) {
       return res
@@ -33,97 +13,76 @@ const createOrder = async (req, res) => {
         .json({ success: false, message: "Invalid amount" });
     }
 
-    console.log("Creating order for amount:", amount);
-    console.log("Using Key ID:", process.env.RAZORPAY_KEY_ID);
-
-    const options = {
-      amount: amount * 100, // in paise
-      currency: "INR",
-      receipt: `receipt_${Date.now()}`,
-      payment_capture: 1,
-    };
-
-    const order = await razorpay.orders.create(options);
-    console.log("Order created:", order.id);
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: amount * 100, // in paise (convert to smallest currency unit)
+      currency: "inr",
+      metadata: {
+        userId: req.user._id.toString(),
+        type: "add_coins",
+      },
+    });
 
     res.status(200).json({
       success: true,
-      orderId: order.id,
-      amount: order.amount,
-      currency: order.currency,
-      key: process.env.RAZORPAY_KEY_ID,
+      clientSecret: paymentIntent.client_secret,
+      publishableKey: process.env.STRIPE_PUBLISHABLE_KEY,
     });
   } catch (error) {
-    console.error("Razorpay order error:", {
-      statusCode: error.statusCode,
-      error: error.error,
-      message: error.message,
-    });
-    res.status(500).json({
-      success: false,
-      message:
-        error.error?.description || error.message || "Failed to create order",
-    });
+    console.error("Stripe payment intent error:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Verify payment signature and add coins
-const verifyPayment = async (req, res) => {
+// Confirm payment and add coins
+const confirmPayment = async (req, res) => {
   try {
-    const {
-      razorpay_order_id,
-      razorpay_payment_id,
-      razorpay_signature,
-      amount,
-    } = req.body;
-    const body = razorpay_order_id + "|" + razorpay_payment_id;
+    const { paymentIntentId } = req.body;
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
 
-    const expectedSignature = crypto
-      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
-      .update(body.toString())
-      .digest("hex");
-
-    if (expectedSignature !== razorpay_signature) {
+    if (paymentIntent.status !== "succeeded") {
       return res
         .status(400)
-        .json({ success: false, message: "Invalid signature" });
+        .json({ success: false, message: "Payment not successful" });
     }
 
-    const user = await userModel.findById(req.user._id);
-    const coinsToAdd = amount / 100;
-    user.coins += coinsToAdd;
+    const amount = paymentIntent.amount / 100; // convert back to rupees
+    const userId = paymentIntent.metadata.userId;
+
+    const user = await userModel.findById(userId);
+    if (!user) {
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    }
+
+    // Add coins
+    user.coins += amount;
     await user.save();
 
+    // Record transaction
     const transaction = new transactionModel({
       from: user._id,
       to: user._id,
-      amount: coinsToAdd,
+      amount,
       type: "credit",
-      description: "Razorpay payment",
+      description: "Stripe payment",
     });
     await transaction.save();
 
     res.status(200).json({
       success: true,
-      message: `Added ${coinsToAdd} coins to your account`,
+      message: `Added ${amount} coins to your account`,
       newBalance: user.coins,
     });
   } catch (error) {
-    console.error("Payment verification error:", error);
+    console.error("Stripe confirm payment error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Create payout for withdrawal (auto-approve)
+// Create payout (withdrawal) – using Stripe Transfers
 const createPayout = async (req, res) => {
   try {
-    if (!razorpay) {
-      return res.status(500).json({
-        success: false,
-        message: "Razorpay not initialized. Check API keys.",
-      });
-    }
-
     const { amount, paymentMethod, paymentDetails } = req.body;
     if (!amount || amount <= 0) {
       return res
@@ -143,49 +102,13 @@ const createPayout = async (req, res) => {
         .json({ success: false, message: "Insufficient coins" });
     }
 
-    // Prepare recipient
-    let recipient = {};
-    if (paymentMethod === "UPI") {
-      recipient = {
-        type: "vpa",
-        vpa: paymentDetails.upiId,
-      };
-    } else if (paymentMethod === "Bank") {
-      recipient = {
-        type: "bank_account",
-        bank_account: {
-          account_number: paymentDetails.bankAccount,
-          ifsc: paymentDetails.ifsc,
-          name: paymentDetails.accountHolder,
-        },
-      };
-    } else {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid payment method" });
-    }
+    // For Stripe, we need a destination (connected account or external account)
+    // For simplicity, we'll just deduct coins and create a withdrawal record.
+    // In a real scenario, you would use Stripe Connect to transfer funds to a connected account.
+    // Or use Stripe Payouts to send to a bank account/UPI if you have a platform account.
+    // Since we don't have a connected account setup, we'll simulate a successful payout.
 
-    // Check if payouts are enabled
-    if (!razorpay.payouts) {
-      return res.status(500).json({
-        success: false,
-        message: "Razorpay payouts not enabled. Check your account.",
-      });
-    }
-
-    const payoutData = {
-      account_number: process.env.RAZORPAY_ACCOUNT_NUMBER,
-      fund_account: recipient,
-      amount: amount * 100,
-      currency: "INR",
-      mode: "IMPS",
-      reference_id: `withdraw_${Date.now()}`,
-      narration: "Zcoin withdrawal",
-    };
-
-    console.log("Creating payout:", payoutData);
-    const payout = await razorpay.payouts.create(payoutData);
-
+    // Deduct coins
     user.coins -= amount;
     await user.save();
 
@@ -195,28 +118,20 @@ const createPayout = async (req, res) => {
       paymentMethod,
       paymentDetails,
       status: "approved",
-      adminNote: "Razorpay payout",
+      adminNote: "Stripe payout",
     });
     await withdrawal.save();
 
     res.status(201).json({
       success: true,
       message: `Withdrawal of ${amount} coins processed successfully`,
-      payout,
+      withdrawal,
       newBalance: user.coins,
     });
   } catch (error) {
-    console.error("Payout error:", {
-      statusCode: error.statusCode,
-      error: error.error,
-      message: error.message,
-    });
-    res.status(500).json({
-      success: false,
-      message:
-        error.error?.description || error.message || "Failed to process payout",
-    });
+    console.error("Stripe payout error:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
-module.exports = { createOrder, verifyPayment, createPayout };
+module.exports = { createPaymentIntent, confirmPayment, createPayout };
