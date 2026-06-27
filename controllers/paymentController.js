@@ -6,14 +6,14 @@ const withdrawalModel = require("../models/withdrawalModel");
 // Create Payment Intent (supports card or UPI)
 const createPaymentIntent = async (req, res) => {
   try {
-    const { amount, paymentMethod = "card" } = req.body; // 'card' or 'upi'
+    const { amount, paymentMethod = "card" } = req.body;
     if (!amount || amount <= 0) {
       return res
         .status(400)
         .json({ success: false, message: "Invalid amount" });
     }
 
-    // Map frontend method to Stripe payment_method_types
+    // Determine allowed payment method types
     let paymentMethodTypes;
     switch (paymentMethod) {
       case "upi":
@@ -25,6 +25,7 @@ const createPaymentIntent = async (req, res) => {
         break;
     }
 
+    // Create PaymentIntent with the selected types
     const paymentIntent = await stripe.paymentIntents.create({
       amount: Math.round(amount * 100), // paise
       currency: "inr",
@@ -33,6 +34,8 @@ const createPaymentIntent = async (req, res) => {
         userId: req.user._id.toString(),
         type: "add_coins",
       },
+      // Optional: set up future usage if you plan to save UPI ID
+      // setup_future_usage: paymentMethod === 'upi' ? 'off_session' : undefined,
     });
 
     res.status(200).json({
@@ -57,6 +60,7 @@ const confirmPayment = async (req, res) => {
         .json({ success: false, message: "Payment intent ID required" });
     }
 
+    // Retrieve the PaymentIntent from Stripe
     const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
 
     // 1. Verify status
@@ -66,7 +70,7 @@ const confirmPayment = async (req, res) => {
         .json({ success: false, message: "Payment not successful" });
     }
 
-    // 2. Verify ownership (prevent users from using another's paymentIntentId)
+    // 2. Verify ownership – prevent users from using another user's payment
     const userIdFromMetadata = paymentIntent.metadata.userId;
     if (userIdFromMetadata !== req.user._id.toString()) {
       return res
@@ -92,7 +96,7 @@ const confirmPayment = async (req, res) => {
       to: user._id,
       amount,
       type: "credit",
-      description: `Stripe payment (${paymentIntent.id})`,
+      description: `Stripe payment (${paymentIntent.id}) via ${paymentIntent.payment_method_types[0]}`,
     });
     await transaction.save();
 
@@ -107,7 +111,7 @@ const confirmPayment = async (req, res) => {
   }
 };
 
-// Create a withdrawal request (approval pending)
+// Create a withdrawal request (pending admin approval)
 const createPayout = async (req, res) => {
   try {
     const { amount, paymentMethod, paymentDetails } = req.body;
@@ -129,22 +133,22 @@ const createPayout = async (req, res) => {
         .json({ success: false, message: "Insufficient coins" });
     }
 
-    // Deduct coins immediately (or hold them – adjust as needed)
+    // Deduct coins immediately
     user.coins -= amount;
     await user.save();
 
-    // Create withdrawal record with 'pending' status (admin will process)
+    // Create withdrawal record with 'pending' status
     const withdrawal = new withdrawalModel({
       user: req.user._id,
       amount,
       paymentMethod,
       paymentDetails,
-      status: "pending", // admin will approve and actually send money
+      status: "pending",
       adminNote: "Awaiting approval",
     });
     await withdrawal.save();
 
-    // (Optional) Use Stripe Payouts or Connect here if you have a connected account
+    // (Optional) Trigger actual Stripe payout if you have a connected account
     // For now, we only record the request.
 
     res.status(201).json({
