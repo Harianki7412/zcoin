@@ -6,7 +6,6 @@ const {
 
 const router = express.Router();
 
-// Public routes
 router.post("/register", registerController);
 router.post("/login", loginController);
 

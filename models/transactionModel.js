@@ -12,7 +12,7 @@ const transactionSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: false,
-      default: null, // null = system
+      default: null,
     },
     amount: {
       type: Number,
