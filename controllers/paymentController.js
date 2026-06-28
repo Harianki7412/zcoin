@@ -105,7 +105,7 @@ const confirmPayment = async (req, res) => {
       to: user._id,
       amount,
       type: "credit",
-      description: `Stripe payment (${paymentIntent.id})`,
+      description: {paymentIntent.id},
     });
     await transaction.save();
 
@@ -155,7 +155,7 @@ const createPayout = async (req, res) => {
       to: null,
       amount,
       type: "debit",
-      description: `Withdrawal request (${withdrawal._id})`,
+      description: {withdrawal._id},
     });
     await transaction.save();
 
