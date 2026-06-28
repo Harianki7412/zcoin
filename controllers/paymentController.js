@@ -43,19 +43,19 @@ const confirmPayment = async (req, res) => {
         .status(400)
         .json({ success: false, message: "Payment not successful" });
     }
-    const userIdFromMetadata = paymentIntent.metadata.userId;
-    if (userIdFromMetadata !== req.user._id.toString()) {
+    const userId = paymentIntent.metadata.userId;
+    if (userId !== req.user._id.toString()) {
       return res
         .status(403)
         .json({ success: false, message: "Unauthorized payment" });
     }
     const amount = paymentIntent.amount / 100;
     const user = await userModel.findById(req.user._id);
-    if (!user)
+    if (!user) {
       return res
         .status(404)
         .json({ success: false, message: "User not found" });
-
+    }
     user.coins += amount;
     await user.save();
 
@@ -64,7 +64,7 @@ const confirmPayment = async (req, res) => {
       to: user._id,
       amount,
       type: "credit",
-      description: `Stripe payment (${paymentIntent.id}) via ${paymentIntent.payment_method_types[0]}`,
+      description: `Stripe payment (${paymentIntent.id})`,
     });
     await transaction.save();
 
@@ -74,7 +74,7 @@ const confirmPayment = async (req, res) => {
       newBalance: user.coins,
     });
   } catch (error) {
-    console.error("Stripe confirm payment error:", error);
+    console.error("Confirm payment error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -93,15 +93,16 @@ const createPayout = async (req, res) => {
         .json({ success: false, message: "Payment details required" });
     }
     const user = await userModel.findById(req.user._id);
-    if (!user)
+    if (!user) {
       return res
         .status(404)
         .json({ success: false, message: "User not found" });
-    if (user.coins < amount)
+    }
+    if (user.coins < amount) {
       return res
         .status(400)
         .json({ success: false, message: "Insufficient coins" });
-
+    }
     user.coins -= amount;
     await user.save();
 

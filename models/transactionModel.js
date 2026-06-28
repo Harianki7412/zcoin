@@ -5,13 +5,11 @@ const transactionSchema = new mongoose.Schema(
     from: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: false,
-      default: null, // null = system
+      default: null,
     },
     to: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: false,
       default: null,
     },
     amount: {
