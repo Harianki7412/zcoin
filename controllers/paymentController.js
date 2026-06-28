@@ -3,7 +3,7 @@ const userModel = require("../models/userModel");
 const transactionModel = require("../models/transactionModel");
 const withdrawalModel = require("../models/withdrawalModel");
 
-// Create Payment Intent (supports card & UPI)
+// ✅ CREATE PAYMENT INTENT – supports card & UPI
 const createPaymentIntent = async (req, res) => {
   try {
     const { amount, paymentMethod = "card" } = req.body;
@@ -12,29 +12,25 @@ const createPaymentIntent = async (req, res) => {
     }
 
     // Determine allowed payment method types
-    let paymentMethodTypes = ["card"];
+    let paymentMethodTypes = [];
     if (paymentMethod === "upi") {
       paymentMethodTypes = ["upi"];
+    } else {
+      paymentMethodTypes = ["card"];
     }
 
-    // UPI requires a mandate and may need additional setup – we'll keep it simple
-    // For test mode, UPI works with any UPI ID (use test UPI IDs like 'success@upi' or 'failure@upi')
-
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(amount * 100), // paise
+      amount: Math.round(amount * 100),
       currency: "inr",
       payment_method_types: paymentMethodTypes,
       metadata: {
         userId: req.user._id.toString(),
         type: "add_coins",
       },
-      // For UPI, you can optionally set payment_method_options if needed
-      // payment_method_options: {
-      //   upi: { mandate_data: { ... } }
-      // }
+      // Optional: enable UPI mandate if required later
     });
 
-    console.log("PaymentIntent created:", paymentIntent.id);
+    console.log("✅ PaymentIntent created:", paymentIntent.id);
 
     res.status(200).json({
       success: true,
@@ -42,11 +38,11 @@ const createPaymentIntent = async (req, res) => {
       paymentIntentId: paymentIntent.id,
     });
   } catch (error) {
-    console.error("Stripe payment intent error:", error);
-    // Return a user-friendly error message
-    let message = "Failed to create payment intent. Please try again.";
+    console.error("❌ Stripe createPaymentIntent error:", error);
+    // Send a more user‑friendly message
+    let message = "Failed to create payment intent.";
     if (error.type === "StripeAuthenticationError") {
-      message = "Stripe authentication failed. Check your API keys.";
+      message = "Invalid Stripe API key. Please check your configuration.";
     } else if (error.message) {
       message = error.message;
     }
@@ -54,7 +50,7 @@ const createPaymentIntent = async (req, res) => {
   }
 };
 
-// Confirm payment – add coins after success
+// ✅ CONFIRM PAYMENT – add coins after successful payment
 const confirmPayment = async (req, res) => {
   try {
     const { paymentIntentId } = req.body;
@@ -79,13 +75,13 @@ const confirmPayment = async (req, res) => {
       return res.status(403).json({ success: false, message: "Unauthorized payment" });
     }
 
-    // Check if coins were already added (idempotency)
-    const existingTransaction = await transactionModel.findOne({
+    // Idempotency: prevent duplicate coin additions
+    const existing = await transactionModel.findOne({
       description: `Stripe payment (${paymentIntent.id})`,
       type: "credit",
     });
-    if (existingTransaction) {
-      console.warn("Duplicate payment detected for", paymentIntent.id);
+    if (existing) {
+      console.warn("⚠️ Duplicate payment detected for", paymentIntent.id);
       return res.status(400).json({
         success: false,
         message: "Payment already processed",
@@ -93,7 +89,7 @@ const confirmPayment = async (req, res) => {
       });
     }
 
-    const amount = paymentIntent.amount / 100; // convert back to rupees
+    const amount = paymentIntent.amount / 100;
     const user = await userModel.findById(req.user._id);
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
@@ -105,7 +101,7 @@ const confirmPayment = async (req, res) => {
 
     // Record transaction
     const transaction = new transactionModel({
-      from: null, // system
+      from: null,
       to: user._id,
       amount,
       type: "credit",
@@ -119,12 +115,12 @@ const confirmPayment = async (req, res) => {
       newBalance: user.coins,
     });
   } catch (error) {
-    console.error("Confirm payment error:", error);
+    console.error("❌ Stripe confirmPayment error:", error);
     res.status(500).json({ success: false, message: error.message || "Payment confirmation failed" });
   }
 };
 
-// Withdrawal – deduct coins and create pending request
+// ✅ CREATE PAYOUT – withdrawal request
 const createPayout = async (req, res) => {
   try {
     const { amount, paymentMethod, paymentDetails } = req.body;
@@ -136,18 +132,14 @@ const createPayout = async (req, res) => {
     }
 
     const user = await userModel.findById(req.user._id);
-    if (!user) {
-      return res.status(404).json({ success: false, message: "User not found" });
-    }
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
     if (user.coins < amount) {
       return res.status(400).json({ success: false, message: "Insufficient coins" });
     }
 
-    // Deduct coins immediately
     user.coins -= amount;
     await user.save();
 
-    // Create withdrawal record
     const withdrawal = new withdrawalModel({
       user: req.user._id,
       amount,
@@ -158,7 +150,6 @@ const createPayout = async (req, res) => {
     });
     await withdrawal.save();
 
-    // Record debit transaction
     const transaction = new transactionModel({
       from: user._id,
       to: null,
@@ -175,7 +166,7 @@ const createPayout = async (req, res) => {
       newBalance: user.coins,
     });
   } catch (error) {
-    console.error("Withdrawal error:", error);
+    console.error("❌ Withdrawal error:", error);
     res.status(500).json({ success: false, message: error.message || "Withdrawal failed" });
   }
 };
