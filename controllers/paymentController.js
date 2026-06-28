@@ -77,7 +77,7 @@ const confirmPayment = async (req, res) => {
 
     // Idempotency: prevent duplicate coin additions
     const existing = await transactionModel.findOne({
-      description: `Stripe payment (${paymentIntent.id})`,
+      description: {paymentIntent.id},
       type: "credit",
     });
     if (existing) {
