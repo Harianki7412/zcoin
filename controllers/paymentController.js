@@ -155,7 +155,7 @@ const createPayout = async (req, res) => {
       to: null,
       amount,
       type: "debit",
-      description: {withdrawal._id},
+      description: withdrawal._id,
     });
     await transaction.save();
 
