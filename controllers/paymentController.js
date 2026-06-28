@@ -77,7 +77,7 @@ const confirmPayment = async (req, res) => {
 
     // Idempotency: prevent duplicate coin additions
     const existing = await transactionModel.findOne({
-      description: {paymentIntent.id},
+      description: paymentIntent.id,
       type: "credit",
     });
     if (existing) {
@@ -105,7 +105,7 @@ const confirmPayment = async (req, res) => {
       to: user._id,
       amount,
       type: "credit",
-      description: {paymentIntent.id},
+      description: paymentIntent.id,
     });
     await transaction.save();
 
